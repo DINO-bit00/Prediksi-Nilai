@@ -130,10 +130,27 @@
   function parseVal(id){
     const v = parseFloat($(id).value);
     if (Number.isFinite(v)) return Math.max(0, Math.min(100, v));
-    return 0; // kosong dianggap 0
+    return 0;
   }
 
   function round2(n){ return Math.round(n*100)/100; }
+
+  function getFinalGrade(vals){
+    const final =
+      vals.uts   * weights.uts   +
+      vals.tugas * weights.tugas +
+      vals.uas   * weights.uas   +
+      vals.hadir * weights.hadir;
+    let grade = "D / E (tidak lulus 💀...)";
+
+    for(const g of grades){
+      if(final >= g.min){
+        grade = g.name;
+        break;
+      }
+    }
+    return { final: round2(final), grade };
+  }
 
   function renderResult(targetComp){
     const vals = {
@@ -143,7 +160,6 @@
       hadir: parseVal('hadir')
     };
 
-    // known contribution (except the target comp)
     let knownSum = 0;
     for(const k of Object.keys(weights)){
       if(k === targetComp) continue;
@@ -152,38 +168,50 @@
 
     const compWeight = weights[targetComp];
 
-    // Build output HTML
-    let html = '';
-    html += `<div style="margin-bottom:10px" class="small">Nilai yang tersedia: UTS=${vals.uts}, Tugas=${vals.tugas}, UAS=${vals.uas}, Kehadiran=${vals.hadir}. Kosong dianggap 0.</div>`;
-    html += `<div style="margin-bottom:8px" class="muted small">Target komponen: <strong>${targetComp.toUpperCase()}</strong> (bobot ${compWeight*100}%).</div>`;
+    let html = "";
+
+    /* 🔥 Tambahan Fitur → Nilai akhir user + grade */
+    const user = getFinalGrade(vals);
+    html += `
+      <div class="grade" style="margin-bottom:10px">
+        <div>
+          <span class="label">Nilai Akhir Kamu</span>
+          <div class="muted small">Total: <strong>${user.final}</strong></div>
+          <div class="muted small">Grade: <strong>${user.grade}</strong></div>
+        </div>
+      </div>
+    `;
+
+    html += `<div class="small" style="margin-bottom:10px">
+      Nilai saat ini — UTS=${vals.uts}, Tugas=${vals.tugas}, UAS=${vals.uas}, Kehadiran=${vals.hadir}
+    </div>`;
+
+    html += `<div class="muted small" style="margin-bottom:10px">
+      Target komponen: <strong>${targetComp.toUpperCase()}</strong> (bobot ${compWeight*100}%)
+    </div>`;
 
     for(const g of grades){
-      const neededTotal = g.min; // target total nilai
-
-      // Equation: knownSum + compValue * compWeight >= neededTotal
-      // compValue >= (neededTotal - knownSum) / compWeight
-
+      const neededTotal = g.min;
       let required = (neededTotal - knownSum) / compWeight;
       required = round2(required);
 
-      // If compWeight is 0 (shouldn't happen) or required is NaN
       if(!isFinite(required)){
-        html += `<div class="grade"><div><span class="label">${g.name}</span><div class="muted small">Gak bisa dihitung (error)</div></div><div></div></div>`;
+        html += `<div class="grade"><div><span class="label">${g.name}</span><div class="muted small">Error gan.</div></div></div>`;
         continue;
       }
 
-      // Clamp message
       if(required <= 0){
-        html += `<div class="grade"><div><span class="label">${g.name}</span><div class="muted small">Selamat! Kamu udah tercapai (butuh ≤ 0 pada komponen ini).</div></div><div class="ok">✓</div></div>`;
+        html += `<div class="grade"><div><span class="label">${g.name}</span><div class="muted small">Udah aman boss (perlu ≤ 0).</div></div><div class="ok">✓</div></div>`;
       } else if(required > 100){
-        html += `<div class="grade"><div><span class="label">${g.name}</span><div class="muted small impossible">Butuh ≥ ${required} → mustahil (lebih dari 100).</div></div><div class="impossible">✖</div></div>`;
+        html += `<div class="grade"><div><span class="label">${g.name}</span><div class="muted small impossible">Butuh ≥ ${required} → mustahil.</div></div><div class="impossible">✖</div></div>`;
       } else {
-        html += `<div class="grade"><div><span class="label">${g.name}</span><div class="muted small">Butuh minimal <strong>${required}</strong> pada <strong>${targetComp.toUpperCase()}</strong>.</div></div><div class="ok">${required<=100? '⚡' : ''}</div></div>`;
+        html += `<div class="grade">
+          <div><span class="label">${g.name}</span>
+          <div class="muted small">Butuh minimal <strong>${required}</strong> pada <strong>${targetComp.toUpperCase()}</strong>.</div>
+          </div><div class="ok">⚡</div></div>`;
       }
     }
 
-    // Extra helpful note: show the minimal required across grades for quick glance
-    // Find first achievable grade (highest) where required <= 100
     const achievable = grades.find(g => {
       const req = (g.min - knownSum)/compWeight;
       return isFinite(req) && req <= 100;
@@ -191,27 +219,30 @@
 
     if(achievable){
       const req = round2((achievable.min - knownSum)/compWeight);
-      html = `<div style="margin-bottom:8px" class="muted small">Grade tertinggi yang masih bisa dicapai: <strong>${achievable.name}</strong> — butuh ${req} pada ${targetComp.toUpperCase()} (atau kurang).</div>` + html;
+      html = `<div class="muted small" style="margin-bottom:8px">
+        Grade tertinggi yg masih mungkin: <strong>${achievable.name}</strong> — butuh ${req} di ${targetComp.toUpperCase()}
+      </div>` + html;
     } else {
-      html = `<div style="margin-bottom:8px" class="warn">Waduh... semua grade A–C butuh >100 pada komponen ${targetComp.toUpperCase()}. Kemungkinan mustahil kecuali ada kebijakan dosen.</div>` + html;
+      html = `<div class="warn" style="margin-bottom:8px">
+        Semua grade A–C mustahil dicapai...
+      </div>` + html;
     }
 
     out.innerHTML = html;
   }
 
   $('calc').addEventListener('click', ()=>{
-    const target = $('targetComp').value;
-    renderResult(target);
+    renderResult($('targetComp').value);
   });
 
   $('reset').addEventListener('click', ()=>{
     ['uts','tugas','uas','hadir'].forEach(id=>$(id).value='');
-    out.innerHTML = `<div class="muted">Reset done. Masukin nilai atau klik Hitung lagi.</div>`;
+    out.innerHTML = `<div class="muted">Reset done. Mulai lagi yaaa.</div>`;
   });
 
-  // initial
-  out.innerHTML = `<div class="muted">Masukin nilai (kosong = 0) lalu pilih komponen yg mau dihitung → klik Hitung.</div>`;
+  out.innerHTML = `<div class="muted">Masukin nilai → klik Hitung.</div>`;
 })();
 </script>
 </body>
 </html>
+
